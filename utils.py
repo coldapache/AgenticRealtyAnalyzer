@@ -22,11 +22,29 @@ errors that might occur.
 Author: Your Name
 Date: YYYY-MM-DD
 """
-
+# sqlite3: Database management library for interacting with SQLite databases
+# Used for connecting to and querying our data_analysis_db.db file
 import sqlite3
+
+# pandas: Data manipulation and analysis library
+# Used for working with data in DataFrame format and SQL query results
 import pandas as pd
+
+# folium: Library for creating interactive maps based on leaflet.js
+# Used as the core mapping functionality to display our real estate data
 import folium
+
+# MarkerCluster: Folium plugin for clustering map markers
+# Used to group nearby markers together for better map performance and visualization
 from folium.plugins import MarkerCluster
+
+# geopandas: Library for working with geospatial data
+# Used for handling geographic data structures and operations
+import geopandas as gpd
+
+# loads from shapely.wkt: Function to parse Well-Known Text (WKT) format
+# Used to convert WKT strings from database into shapely geometry objects for mapping
+from shapely.wkt import loads as wkt_loads
 
 def get_property_data(db_path='data_analysis_db.db'):
     """
@@ -114,191 +132,92 @@ def get_listing_analysis_data(db_path='data_analysis_db.db'):
     print("🔒 Database connection closed for listing analysis.")
     return df
 
-def get_crime_clusters_data(db_path='data_analysis_db.db'):
-    """
-    Retrieve crime cluster data from the SQLite database.
-    
-    Returns:
-        pd.DataFrame: A DataFrame containing crime cluster data with columns:
-                      crime_type, incident_count, cluster_description, latitude, longitude, analyzed_at
-    """
-    print("🔄 Starting get_crime_clusters_data()")
+def create_map_layers(zoom_start=4):
+    """Create Folium map with four distinct layers and optimized clustering"""
+    print("🔄 Initializing map layers")
     try:
-        conn = sqlite3.connect(db_path)
-        print("✅ Database connection established for crime clusters.")
-    except sqlite3.Error as e:
-        print(f"❌ Error connecting to the database for crime clusters: {e}")
-        raise
-
-    query = """
-        SELECT 
-            crime_type,
-            incident_count,
-            cluster_description,
-            latitude,
-            longitude,
-            analyzed_at
-        FROM crime_analysis
-    """
-    print(f"🔍 Executing SQL query for crime clusters:\n{query}")
-    try:
-        df = pd.read_sql_query(query, conn)
-        print(f"✅ Query executed successfully. Retrieved {len(df)} crime cluster record(s).")
-    except Exception as e:
-        print(f"❌ Error executing query for crime clusters: {e}")
-        conn.close()
-        raise
-
-    conn.close()
-    print("🔒 Database connection closed for crime clusters.")
-    return df
-
-def get_color_for_crime(crime_type):
-    """
-    Dynamically generates a color for a crime type.
-    Returns one of a predefined list of colors based on the hash of the crime type.
-    """
-    colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'lightred', 'beige', 
-              'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'pink', 'lightblue', 'lightgreen', 'gray', 'black']
-    idx = abs(hash(crime_type)) % len(colors)
-    return colors[idx]
-
-def create_map_layers():
-    """
-    Create a Folium map with selectable layers:
-      - 'Listing Analysis': Primary layer showing markers from the listing_analysis table using custom icons wrapped inside
-        a MarkerCluster.
-      - 'All Listings': Secondary layer (hidden by default) showing all property records inside a MarkerCluster.
-      - 'Crime Clusters': New layer showing crime cluster markers with dynamically assigned colors by crime type inside a MarkerCluster.
-    
-    Returns:
-        folium.Map: A Folium map object with the three feature groups plus a layer control.
-    """
-    print("🔄 Starting create_map_layers()")
-    
-    # Get listing analysis data
-    df_analysis = get_listing_analysis_data()
-    df_analysis['latitude'] = pd.to_numeric(df_analysis['latitude'], errors='coerce')
-    df_analysis['longitude'] = pd.to_numeric(df_analysis['longitude'], errors='coerce')
-    df_analysis = df_analysis.dropna(subset=['latitude', 'longitude'])
-    
-    # Get all listings data (for the secondary layer, which is hidden by default)
-    df_all = get_property_data()
-    df_all['latitude'] = pd.to_numeric(df_all['latitude'], errors='coerce')
-    df_all['longitude'] = pd.to_numeric(df_all['longitude'], errors='coerce')
-    df_all = df_all.dropna(subset=['latitude', 'longitude'])
-    
-    # Center the map preferentially on the analysis data (fallback to all listings, then USA center)
-    if not df_analysis.empty:
-        center_lat = df_analysis['latitude'].mean()
-        center_lon = df_analysis['longitude'].mean()
-    elif not df_all.empty:
-        center_lat = df_all['latitude'].mean()
-        center_lon = df_all['longitude'].mean()
-    else:
-        center_lat, center_lon = 37.0902, -95.7129  # Fallback to center of USA
-    
-    # Set zoom_start=4 and use the 'Cartodb Positron' tiles.
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=7, tiles='Cartodb Positron')
-    print(f"📍 Map center set at latitude: {center_lat}, longitude: {center_lon}")
-    
-    ## Listing Analysis Layer using MarkerCluster ##
-    fg_analysis = folium.FeatureGroup(name="Listing Analysis", show=True)
-    marker_cluster_analysis = MarkerCluster().add_to(fg_analysis)
-    for _, row in df_analysis.iterrows():
-        market_val = str(row.get('market_exceptionality', '')).lower()
-        if "good deal" in market_val:
-            icon_params = {"prefix": "fa", "color": "green", "icon": "arrow-up"}
-            angle = 0
-        elif "average deal" in market_val:
-            icon_params = {"prefix": "fa", "color": "orange", "icon": "arrow-right"}
-            angle = 0
-        elif "bad deal" in market_val:
-            icon_params = {"prefix": "fa", "color": "red", "icon": "arrow-down"}
-            angle = 0
-        else:
-            icon_params = {"prefix": "fa", "color": "gray", "icon": "question"}
-            angle = 0
-        icon = folium.Icon(angle=angle, **icon_params)
+        # Data loading with validation
+        df_analysis = get_listing_analysis_data()
+        df_all = get_property_data()
         
-        popup_content = f"""
-            <div style='font-family: "Univers Roman", Helvetica, sans-serif; font-size: 18px;'>
-                <b>{row['market_exceptionality'].upper()}</b><br>
-                <b>Price:</b> ${row['price']:,.2f}<br>
-                <b>Address:</b> {row['address']}<br>
-                <b>Beds/Baths:</b> {row['bedrooms']}/{row['bathrooms']}<br>
-                <b>Analyzed At:</b> {row['analyzed_at']}
-            </div>
-        """
-        tooltip_html = f"""
-            <div style='font-family: "Univers Roman", Helvetica, sans-serif; font-size: 16px; font-weight: bold;'>
-                {row['market_exceptionality'].upper()}
-            </div>
-        """
-        folium.Marker(
-            location=[row['latitude'], row['longitude']],
-            popup=folium.Popup(popup_content, max_width=300),
-            tooltip=folium.Tooltip(tooltip_html, parse_html=True),
-            icon=icon
-        ).add_to(marker_cluster_analysis)
-    m.add_child(fg_analysis)
-    
-    ## All Listings Layer using MarkerCluster ##
-    fg_all = folium.FeatureGroup(name="All Listings", show=False)
-    marker_cluster_all = MarkerCluster().add_to(fg_all)
-    for _, row in df_all.iterrows():
-        popup_content = f"""
-            <div style='font-family: Helvetica, sans-serif; font-size: 14px;'>
-                <b>Address:</b> {row['address']}<br>
-                <b>Price:</b> ${row['price']:,.2f}<br>
-                <b>Beds/Baths:</b> {row['bedrooms']}/{row['bathrooms']}<br>
-                <b>Sqft:</b> {row['sqft']:,}
-            </div>
-        """
-        folium.CircleMarker(
-            location=[row['latitude'], row['longitude']],
-            radius=6,
-            popup=folium.Popup(popup_content, max_width=300),
-            color="blue",
-            fill=True,
-            fill_color="blue",
-            fill_opacity=0.5,
-            weight=1
-        ).add_to(marker_cluster_all)
-    m.add_child(fg_all)
-    
-    ## Crime Clusters Layer with dynamic colors using MarkerCluster ##
-    df_clusters = get_crime_clusters_data()
-    fg_clusters = folium.FeatureGroup(name="Crime Clusters", show=True)
-    marker_cluster_crime = MarkerCluster().add_to(fg_clusters)
-    for _, row in df_clusters.iterrows():
-        # Determine dynamic color based on crime type.
-        dynamic_color = get_color_for_crime(row['crime_type'])
-        popup_content = f"""
-            <div style='font-family: Helvetica, sans-serif; font-size: 14px;'>
-                <b>Crime Cluster:</b> {row['crime_type']}<br>
-                <b>Incidents:</b> {row['incident_count']}<br>
-                <b>Analyzed At:</b> {row['analyzed_at']}<br>
-                <b>Description:</b> {row['cluster_description']}
-            </div>
-        """
-        tooltip_text = f"Crime Cluster: {row['crime_type']}"
-        folium.CircleMarker(
-            location=[row['latitude'], row['longitude']],
-            radius=8,
-            popup=folium.Popup(popup_content, max_width=300),
-            tooltip=folium.Tooltip(tooltip_text),
-            color=dynamic_color,
-            fill=True,
-            fill_color=dynamic_color,
-            fill_opacity=0.7,
-            weight=1
-        ).add_to(marker_cluster_crime)
-    m.add_child(fg_clusters)
-    print(f"DEBUG: Added Crime Clusters layer with {len(df_clusters)} marker(s).")
-    
-    # Add layer control with a left-hand side position.
-    folium.LayerControl(collapsed=False, position='topleft').add_to(m)
-    
-    print("✅ Map with all layers created successfully.")
-    return m
+        # Coordinate validation
+        for df in [df_analysis, df_all]:
+            df[['latitude', 'longitude']] = df[['latitude', 'longitude']].apply(pd.to_numeric, errors='coerce')
+            df.dropna(subset=['latitude', 'longitude'], inplace=True)
+
+        # Map initialization
+        m = folium.Map(
+            location=[df_analysis['latitude'].mean(), df_analysis['longitude'].mean()] if not df_analysis.empty else [39.2904, -76.6122],
+            zoom_start=zoom_start,
+            tiles='CartoDB Positron',
+            control_scale=True
+        )
+        
+        # Layer 1: Listing Analysis with adjusted clustering
+        fg_analysis = folium.FeatureGroup(name="📊 Listing Analysis", show=True)
+        mc_analysis = MarkerCluster(
+            options={
+                'disableClusteringAtZoom': 12,  # Starts breaking up at zoom level 12
+                'maxClusterRadius': 40,
+                'showCoverageOnHover': False
+            }
+        ).add_to(fg_analysis)
+        for idx, row in df_analysis.iterrows():
+            try:
+                # Debugging line to check actual values
+                print(f"Debug market_exceptionality: {row['market_exceptionality']}")
+                
+                icon_config = {
+                    "good deal": {"color": "green", "icon": "arrow-up"},
+                    "average deal": {"color": "orange", "icon": "arrow-right"},
+                    "bad deal": {"color": "red", "icon": "arrow-down"}
+                }.get(row['market_exceptionality'].strip().lower(), {"color": "gray", "icon": "question"})
+                
+                folium.Marker(
+                    [row['latitude'], row['longitude']],
+                    icon=folium.Icon(**icon_config, prefix='fa'),
+                    popup=folium.Popup(f"""
+                        <b>{row['market_exceptionality']}</b><br>
+                        City: {row['city']}<br>
+                        Price: ${row['price']:,.0f}<br>
+                        {row['bedrooms']}BR/{row['bathrooms']}BA<br>
+                        {row.get('sqft', 'N/A')} sqft<br>
+                        Analyzed: {row['analyzed_at']}<br>
+                        <i>{row['address']}</i>
+                    """, max_width=300),
+                    tooltip=row['market_exceptionality'].title()
+                ).add_to(mc_analysis)
+            except Exception as e:
+                print(f"⚠️ Error processing listing {idx}: {e}")
+        
+        # Layer 2: All Listings with adjusted clustering
+        fg_all = folium.FeatureGroup(name="🏠 All Listings", show=False)
+        mc_all = MarkerCluster(
+            options={
+                'disableClusteringAtZoom': 13,
+                'maxClusterRadius': 30
+            }
+        ).add_to(fg_all)
+        for idx, row in df_all.iterrows():
+            folium.CircleMarker(
+                [row['latitude'], row['longitude']],
+                radius=6,
+                color='#3186cc',
+                fill=True,
+                popup=f"${row['price']:,.0f}",
+                tooltip=row['address']
+            ).add_to(mc_all)
+
+
+
+        # Add all layers and controls with optimized clustering
+        for layer in [fg_analysis, fg_all]:
+            m.add_child(layer)
+        
+
+        print("✅ Map layers successfully created")
+        return m
+
+    except Exception as e:
+        print(f"🔥 Critical error in create_map_layers: {e}")
+        raise

@@ -1,5 +1,5 @@
 """
-main.py
+property_map.py
 
 This is the main FastAPI application that serves an interactive real estate map.
 It integrates with our utilities in 'utils.py' to retrieve property data from a SQLite database
@@ -55,73 +55,6 @@ def get_city_locations(db_path='data_analysis_db.db'):
         print(f"❌ Error retrieving city locations: {e}")
         return []
 
-def add_crime_areas_layer(m, db_path='data_analysis_db.db'):
-    """
-    Adds crime area polygons from the SQLite database to the Folium map.
-    - Preserves existing UI/layers.
-    - Colors polygons by crime type.
-    - Shows crime type in tooltips.
-    - Maintains layer control (your existing UI remains unchanged).
-    """
-    # Create a FeatureGroup for crime areas (so they appear as a separable layer)
-    fg = folium.FeatureGroup(name='Crime Areas', show=True)
-    
-    try:
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-        c.execute("SELECT crime_type, geometry FROM crime_areas")
-        rows = c.fetchall()
-        conn.close()
-        
-        print(f"DEBUG: Loaded {len(rows)} crime areas from database.")
-        
-        if not rows:
-            print("DEBUG: No crime area polygons found in the database!")
-            return m
-        
-        # Function to generate a consistent color based on the crime type
-        def get_color(crime_type):
-            h = hashlib.sha256(crime_type.encode()).hexdigest()[:6]
-            return f'#{h}'
-
-        for crime_type, wkt in rows:
-            try:
-                # Log part of the WKT string for debugging
-                print(f"DEBUG: Processing crime type '{crime_type}' with WKT: {wkt[:60]}...")
-                poly = loads(wkt)
-                if poly.is_empty:
-                    print(f"DEBUG: Polygon for crime type '{crime_type}' is empty. Skipping.")
-                    continue
-                
-                # Generate a color based on the crime type
-                color = get_color(crime_type)
-                bounds = poly.bounds
-                print(f"DEBUG: Polygon bounds: {bounds}. Using color {color}.")
-                
-                # Create GeoJson layer for the polygon
-                geo_json = folium.GeoJson(
-                    poly.__geo_interface__,
-                    style_function=lambda feat, c=color: {
-                        'fillColor': c,
-                        'color': c,
-                        'weight': 1,
-                        'fillOpacity': 0.4
-                    },
-                    tooltip=folium.Tooltip(f"<b>{crime_type}</b>")
-                )
-                geo_json.add_to(fg)
-            except Exception as e:
-                print(f"ERROR: Failed to process polygon for crime type '{crime_type}': {e}")
-                continue
-        
-        fg.add_to(m)
-        print("DEBUG: Crime Areas layer added to map.")
-        return m
-        
-    except Exception as e:
-        print(f"ERROR: Database error: {e}")
-        return m
-
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """
@@ -142,11 +75,10 @@ async def root():
     cities = get_city_locations()
     city_data_json = json.dumps(cities)
     
-    # Add crime areas layer
-    m = add_crime_areas_layer(m)
+
     
     # Preserve existing layer control
-    folium.LayerControl(position='topright', collapsed=False).add_to(m)
+    folium.LayerControl(position='topleft', collapsed=False).add_to(m)
     
     html_content = f"""
     <!DOCTYPE html>
