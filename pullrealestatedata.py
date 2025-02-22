@@ -34,7 +34,7 @@ HEADERS = {
 }
 # Query parameters for the search. These specify the target location and type of listing.
 SEARCH_PARAMS = {
-    "keyword": "Fredericksburg VA",
+    "keyword": "Atlanta GA under 300K",
     "type": "forSale"
 }
 

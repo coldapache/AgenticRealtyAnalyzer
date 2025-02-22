@@ -89,13 +89,7 @@ def get_property_data(db_path='data_analysis_db.db'):
     return df
 
 def get_listing_analysis_data(db_path='data_analysis_db.db'):
-    """
-    Retrieve listing analysis data from the SQLite database.
-    
-    Returns:
-        pd.DataFrame: A DataFrame containing:
-            - address, city, price, bedrooms, bathrooms, latitude, longitude, market_exceptionality, analyzed_at
-    """
+    """Retrieve listing analysis data including top pick status"""
     print("🔄 Starting get_listing_analysis_data()")
     try:
         conn = sqlite3.connect(db_path)
@@ -114,6 +108,8 @@ def get_listing_analysis_data(db_path='data_analysis_db.db'):
             latitude,
             longitude,
             market_exceptionality,
+            crime_impact,
+            top_pick,
             analyzed_at
         FROM listing_analysis
         WHERE latitude IS NOT NULL 
@@ -133,19 +129,24 @@ def get_listing_analysis_data(db_path='data_analysis_db.db'):
     return df
 
 def create_map_layers(zoom_start=4):
-    """Create Folium map with four distinct layers and optimized clustering"""
+    """Create Folium map with layers including top pick visualization"""
     print("🔄 Initializing map layers")
     try:
         # Data loading with validation
         df_analysis = get_listing_analysis_data()
         df_all = get_property_data()
         
-        # Coordinate validation
+        # Validate and clean coordinate data for both dataframes
+        # 1. Convert latitude and longitude to numeric values, replacing non-numeric with NaN
+        # 2. Remove any rows with missing coordinates to ensure map functionality
+        # This prevents mapping errors from invalid or missing coordinate data
         for df in [df_analysis, df_all]:
+            # Convert coordinates to numeric, coercing errors to NaN instead of raising exceptions
             df[['latitude', 'longitude']] = df[['latitude', 'longitude']].apply(pd.to_numeric, errors='coerce')
+            # Remove rows with NaN coordinates since they can't be mapped
             df.dropna(subset=['latitude', 'longitude'], inplace=True)
 
-        # Map initialization
+        # Map initialization - zooms to the US average latitude and longitude
         m = folium.Map(
             location=[df_analysis['latitude'].mean(), df_analysis['longitude'].mean()] if not df_analysis.empty else [39.2904, -76.6122],
             zoom_start=zoom_start,
@@ -153,31 +154,50 @@ def create_map_layers(zoom_start=4):
             control_scale=True
         )
         
-        # Layer 1: Listing Analysis with adjusted clustering
+        # Layer 1: Listing Analysis with adjusted clustering, does not cluster too much
         fg_analysis = folium.FeatureGroup(name="📊 Listing Analysis", show=True)
         mc_analysis = MarkerCluster(
             options={
-                'disableClusteringAtZoom': 12,  # Starts breaking up at zoom level 12
+                'disableClusteringAtZoom': 10,  # Starts breaking up at zoom level 10
                 'maxClusterRadius': 40,
                 'showCoverageOnHover': False
             }
         ).add_to(fg_analysis)
         for idx, row in df_analysis.iterrows():
             try:
-                # Debugging line to check actual values
-                print(f"Debug market_exceptionality: {row['market_exceptionality']}")
-                
-                icon_config = {
+                # Determine icon configuration based on market exceptionality and top pick status
+                base_config = {
                     "good deal": {"color": "green", "icon": "arrow-up"},
                     "average deal": {"color": "orange", "icon": "arrow-right"},
                     "bad deal": {"color": "red", "icon": "arrow-down"}
                 }.get(row['market_exceptionality'].strip().lower(), {"color": "gray", "icon": "question"})
-                
-                folium.Marker(
+
+                # Modify icon for top picks
+                if row.get('top_pick') == 'Top Pick':
+                    darker_gold = "#B8860B"  # Darker gold color (DarkGoldenRod)
+                    base_config["color"] = darker_gold
+                    base_config["prefix"] = 'fa'
+                    # Add a more solid glowing effect using CSS
+                    icon_html = f"""
+                        <div class="top-pick-marker" 
+                             style="animation: glow 2s ease-in-out infinite alternate;">
+                            <i class="fa fa-{base_config['icon']}" 
+                               style="color: {base_config['color']};
+                                      text-shadow: 1px 1px 2px #000;">
+                            </i>
+                        </div>
+                    """
+                else:
+                    icon_html = None
+
+                # Create marker
+                marker = folium.Marker(
                     [row['latitude'], row['longitude']],
-                    icon=folium.Icon(**icon_config, prefix='fa'),
+                    icon=folium.DivIcon(html=icon_html) if icon_html else folium.Icon(**base_config, prefix='fa'),
                     popup=folium.Popup(f"""
+                        {'<b>🌟 TOP PICK! 🌟</b><br>' if row.get('top_pick') == 'Top Pick' else ''}
                         <b>{row['market_exceptionality']}</b><br>
+                        {'<b>' + row.get('crime_impact', 'Crime Impact: Not Analyzed') + '</b><br>' if row.get('crime_impact') else ''}
                         City: {row['city']}<br>
                         Price: ${row['price']:,.0f}<br>
                         {row['bedrooms']}BR/{row['bathrooms']}BA<br>
@@ -185,8 +205,35 @@ def create_map_layers(zoom_start=4):
                         Analyzed: {row['analyzed_at']}<br>
                         <i>{row['address']}</i>
                     """, max_width=300),
-                    tooltip=row['market_exceptionality'].title()
-                ).add_to(mc_analysis)
+                    tooltip=f"{'🌟 TOP PICK! - ' if row.get('top_pick') == 'Top Pick' else ''}{row['market_exceptionality'].title()}"
+                )
+
+                # Add custom CSS for enhanced glowing effect
+                if row.get('top_pick') == 'Top Pick':
+                    m.get_root().header.add_child(folium.Element("""
+                        <style>
+                        @keyframes glow {
+                            from {
+                                filter: drop-shadow(0 0 3px #FFD700) 
+                                       drop-shadow(0 0 6px #B8860B) 
+                                       drop-shadow(0 0 9px #8B6914);
+                            }
+                            to {
+                                filter: drop-shadow(0 0 6px #FFD700) 
+                                       drop-shadow(0 0 12px #B8860B) 
+                                       drop-shadow(0 0 18px #8B6914);
+                            }
+                        }
+                        .top-pick-marker {
+                            font-size: 22px;
+                            filter: drop-shadow(0 0 4px #B8860B);
+                            -webkit-text-stroke: 1px #000;
+                        }
+                        </style>
+                    """))
+
+                marker.add_to(mc_analysis)
+
             except Exception as e:
                 print(f"⚠️ Error processing listing {idx}: {e}")
         
