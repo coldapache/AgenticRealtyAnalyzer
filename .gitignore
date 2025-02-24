@@ -2,6 +2,10 @@
 config.py
 .env
 
+# Database files
+data_analysis_db.db
+*.db
+
 # Data directories
 CrimeData/DataRepo/
 
