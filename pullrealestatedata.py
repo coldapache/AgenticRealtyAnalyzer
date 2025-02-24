@@ -22,12 +22,12 @@ import pandas as pd
 import sqlite3
 import os
 from datetime import datetime
+from config import API_KEY
 
 # =============================================================================
 # API CONFIGURATION
 # =============================================================================
 API_ENDPOINT = "https://api.hasdata.com/scrape/zillow/listing"  # Correct endpoint for listings
-API_KEY = "58f7b948-8c5c-4ec9-b5d5-88d050f2c3a4"
 HEADERS = {
     "x-api-key": API_KEY,
     "Content-Type": "application/json"
