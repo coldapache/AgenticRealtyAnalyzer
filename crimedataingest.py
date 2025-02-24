@@ -35,10 +35,10 @@ MAX_ALLOWED_TOKENS = 8000  # Not a primary concern here.
 
 # Mapping for standard columns (each standard field may have multiple candidate names).
 STANDARD_COLUMNS = {
-    "crime_date": ["dateofcrime", "dateofoffense", "date", "CrimeDate", "RMSOccurrenceDate", "CrimeDateTime"],
-    "crime_type": ["crime_type", "crimetype", "type", "offense", "incident_type", "crime_category", "offense_description", "description", "crime_description", "detail", "Description", "NIBRSDescription"],
-    "latitude": ["latitude", "lat", "Latitude", "MapLatitude"],
-    "longitude": ["longitude", "lon", "lng", "long", "Longitude", "MapLongitude"],
+    "crime_date": ["dateofcrime", "DATE OCC", "ReportDate", "dateofoffense", "date", "CrimeDate", "RMSOccurrenceDate", "CrimeDateTime"],
+    "crime_type": ["crime_type", "Crm Cd Desc","NIBRS_Offense", "crimetype", "type", "offense", "incident_type", "crime_category", "offense_description", "description", "crime_description", "detail", "Description", "NIBRSDescription"],
+    "latitude": ["latitude", "y", "lat", "Latitude", "MapLatitude", "LAT"],
+    "longitude": ["longitude", "x", "lon", "lng", "long", "Longitude", "MapLongitude", "LON"],
 }
 
 # --- DATABASE SETUP ---
@@ -70,19 +70,49 @@ def clean_name(name):
     print(f"DEBUG: Cleaned column '{original}' → '{cleaned}'")
     return cleaned
 
+def get_processed_files():
+    """Get list of already processed source files from database"""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.execute("SELECT DISTINCT source_file FROM crime_data")
+            processed = {row[0] for row in cursor.fetchall()}
+            print(f"DEBUG: Found {len(processed)} previously processed files:")
+            for f in processed:
+                print(f" - {f}")
+            return processed
+    except sqlite3.Error as e:
+        print(f"⚠️ Error checking processed files: {e}")
+        return set()
+
 def get_csv_files():
-    """File discovery with path verification"""
+    """File discovery with processed file filtering"""
     print(f"\n🔍 Checking data folder: {CSV_FOLDER}")
     if not os.path.exists(CSV_FOLDER):
         print(f"🔥 ERROR: Folder does not exist: {CSV_FOLDER}")
         return []
     
-    csv_files = glob.glob(os.path.join(CSV_FOLDER, "*.csv"))
-    print("Found files:")
-    for f in csv_files:
-        print(f" - {os.path.basename(f)}")
+    # Get all CSV files
+    all_csv_files = glob.glob(os.path.join(CSV_FOLDER, "*.csv"))
     
-    return csv_files
+    # Get previously processed files
+    processed_files = get_processed_files()
+    
+    # Filter to only new files
+    new_files = []
+    for file_path in all_csv_files:
+        filename = os.path.basename(file_path)
+        if filename not in processed_files:
+            new_files.append(file_path)
+            print(f"✨ New file found: {filename}")
+        else:
+            print(f"⏭️ Skipping previously processed: {filename}")
+    
+    if not new_files:
+        print("📝 No new files to process")
+    else:
+        print(f"🎯 Found {len(new_files)} new files to process")
+    
+    return new_files
 
 def load_csv_file(file_path):
     """
